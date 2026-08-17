@@ -1,0 +1,31 @@
+sequenceDiagram
+    actor CW as Caseworker
+    participant B as Browser SPA
+    participant BFF as Vercel BFF
+    participant API as Azure API
+    participant R as PII Redactor
+    participant S as AI Search
+    participant M as OpenAI
+    participant CS as Content Safety
+    participant DB as Azure SQL
+
+    CW->>B: Ask CaseAssist
+    B->>BFF: POST /api/assistant
+    BFF->>API: POST /case-assist/requests (secret + persona)
+    API->>DB: resolve actor, load case, authorize
+    API->>R: redact question + context
+    API->>S: retrieve approved policy (top 3)
+    API->>M: generate structured JSON draft
+    M-->>API: summary + missingDocuments + citedSourceIds
+    API->>R: scan output for PII
+    API->>CS: content safety analyze
+    API->>API: citation validate + risk classify
+    alt sensitive
+        API->>DB: create ReviewItem (marcus.reed)
+    else clean
+        API->>DB: status DraftReady
+    end
+    API->>DB: persist AIRequest + safety trace + audit
+    API-->>BFF: draft + sources + reviewId
+    BFF-->>B: draft + trace
+    B-->>CW: rendered draft + safety trace

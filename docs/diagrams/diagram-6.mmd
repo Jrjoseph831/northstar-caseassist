@@ -1,0 +1,40 @@
+erDiagram
+    APPLICANT   ||--|| APPLICATION  : applies
+    APPLICATION ||--|| CASE         : converts
+    CASE        ||--o{ CASEDOCUMENT : has
+    CASE        ||--o{ CASENOTE     : has
+    CASE        ||--o{ AIREQUEST    : has
+    AIREQUEST   ||--o| REVIEWITEM   : routes
+    CASE        ||--o{ AUDITEVENT   : records
+    POLICYSECTION }o--o{ AIREQUEST  : grounds
+
+    APPLICANT {
+        int householdSize
+        string syntheticName
+    }
+    CASE {
+        string caseNumber
+        string status
+        string program
+    }
+    CASEDOCUMENT {
+        string typeInFilename
+        string scanStatus
+    }
+    CASENOTE {
+        string noteType
+        string content
+    }
+    AIREQUEST {
+        string redactedQuestion
+        string safetyTraceJson
+        decimal estimatedCost
+    }
+    REVIEWITEM {
+        string assignedReviewer
+        string decision
+    }
+    POLICYSECTION {
+        string sourceId
+        bool isApproved
+    }

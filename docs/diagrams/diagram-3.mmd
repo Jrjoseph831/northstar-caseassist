@@ -1,0 +1,26 @@
+flowchart TD
+    START(["Ask CaseAssist"]) --> A1["1 · Identity: persona to actor"]
+    A1 -->|"fail"| E401["401 + audit"]
+    A1 --> A2["2 · Load case"]
+    A2 -->|"none"| E404["404"]
+    A2 --> A3{"3 · Authorize<br/>Caseworker AND assigned?"}
+    A3 -->|"no"| E403["403 CASE_ACCESS_DENIED"]
+    A3 -->|"yes"| A4{"4 · Validate 1..2000 chars"}
+    A4 -->|"no"| E400["400"]
+    A4 -->|"yes"| A5{"5 · Daily budget<br/>max 40 req and $0.25/user/day"}
+    A5 -->|"over"| E429["429 + audit"]
+    A5 -->|"ok"| B6["6 · Redact question (PII)"]
+    B6 --> B7["7 · Prompt-injection scan"]
+    B7 --> B8["8 · Build context<br/>doc-types REDACTED · background REDACTED<br/>no identity · no doc contents"]
+    B8 --> B9["9 · Retrieve approved policy (AI Search, top 3)"]
+    B9 --> C10["10 · Model: OpenAI structured JSON draft<br/>compose text + exact excerpts + SOURCE-ID"]
+    C10 --> D11["11 · Citation validate"]
+    D11 --> D12["12 · Output PII scan"]
+    D12 --> D13["13 · Content safety"]
+    D13 --> D14["14 · Risk classify"]
+    D14 --> DEC{"Any reason codes?"}
+    DEC -->|"no"| DRAFT["status DraftReady<br/>requiresReview = false"]
+    DEC -->|"yes"| REVIEW["status PendingReview<br/>create ReviewItem to marcus.reed<br/>audit review.trigger"]
+    DRAFT --> PERSIST["Persist AIRequest + SafetyTrace<br/>audit steps 6-14"]
+    REVIEW --> PERSIST
+    PERSIST --> RESP(["Return draft + sources + trace"])
