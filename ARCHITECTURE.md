@@ -4,9 +4,6 @@ Responsible‑AI casework assistant. Core thesis: **redact on the way in, ground
 policy, validate on the way out, and never let the AI make the decision — a human does, and
 every step is audited.**
 
-> Diagrams are [Mermaid](https://mermaid.js.org). They render on GitHub, in VS Code (with the
-> "Markdown Preview Mermaid Support" extension), and at <https://mermaid.live>.
-
 ---
 
 ## 1. Deployment topology & trust boundaries
