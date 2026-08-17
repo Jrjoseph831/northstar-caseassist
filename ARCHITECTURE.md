@@ -8,6 +8,11 @@ every step is audited.**
 
 ## 1. Deployment topology & trust boundaries
 
+![1. Deployment topology & trust boundaries](docs/diagrams/diagram-1.png)
+
+<details>
+<summary>Mermaid source</summary>
+
 ```mermaid
 flowchart TD
     subgraph BROWSER["Browser — React SPA (app/page.tsx)"]
@@ -46,6 +51,8 @@ flowchart TD
     class BROWSER,VERCEL,AZURE boundary;
 ```
 
+</details>
+
 **Trust boundary 1** = browser → Vercel (no secret ever in the browser).
 **Trust boundary 2** = Vercel BFF → Azure API (shared secret + persona header). The API only
 accepts traffic that presents the shared secret.
@@ -58,6 +65,11 @@ The application runs **inside the agency's own Azure tenant**, under the company
 identity, logging, and cybersecurity controls. Protection is layered, so no single point
 carries the whole burden — and case data (including an SSN in a case record) is scoped to the
 **assigned caseworker only**, never broadly visible and never sent to the AI.
+
+![2. Enterprise security envelope — where the data is protected](docs/diagrams/diagram-2.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart TB
@@ -88,6 +100,8 @@ flowchart TB
     PLAT -. governs .- L4
 ```
 
+</details>
+
 | Layer | Control | Enforced where |
 |---|---|---|
 | **Identity** | Entra ID, MFA, app role from AD security groups | Company IAM platform (the demo stubs identity as a persona switch; the authorization that consumes it is real) |
@@ -106,6 +120,11 @@ entering the model or the model provider's logs.
 ## 3. The governed CaseAssist pipeline
 
 Fires on **Ask CaseAssist**. Every numbered step writes an audit event.
+
+![3. The governed CaseAssist pipeline](docs/diagrams/diagram-3.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart TD
@@ -136,9 +155,16 @@ flowchart TD
     PERSIST --> RESP(["Return draft + sources + trace"])
 ```
 
+</details>
+
 ---
 
 ## 4. Request sequence (who calls whom)
+
+![4. Request sequence (who calls whom)](docs/diagrams/diagram-4.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 sequenceDiagram
@@ -174,9 +200,16 @@ sequenceDiagram
     B-->>CW: rendered draft + safety trace
 ```
 
+</details>
+
 ---
 
 ## 5. Roles, persona routing & separation of duties
+
+![5. Roles, persona routing & separation of duties](docs/diagrams/diagram-5.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart LR
@@ -196,6 +229,8 @@ flowchart LR
     W -. "submitter != approver" .-> V
 ```
 
+</details>
+
 Enforced server-side: caseworkers see only their own cases; reviewers decide only items
 assigned to them; a submitter can never approve their own item; only admins read audit
 events or run evaluations.
@@ -203,6 +238,11 @@ events or run evaluations.
 ---
 
 ## 6. Data model (Azure SQL — all rows synthetic)
+
+![6. Data model (Azure SQL — all rows synthetic)](docs/diagrams/diagram-6.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 erDiagram
@@ -247,12 +287,19 @@ erDiagram
     }
 ```
 
+</details>
+
 `CaseNote` of type `CaseBackground` is the (redacted) text fed to the model as context.
 Document **content** lives in Blob and is never sent to the model — only the type (filename).
 
 ---
 
 ## 7. PII & decision gates
+
+![7. PII & decision gates](docs/diagrams/diagram-7.png)
+
+<details>
+<summary>Mermaid source</summary>
 
 ```mermaid
 flowchart TD
@@ -272,6 +319,8 @@ flowchart TD
     HR --> AUD["Audit: counts + reason codes (no raw PII)"]
     DR --> AUD
 ```
+
+</details>
 
 ---
 
