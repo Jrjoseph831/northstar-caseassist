@@ -1,0 +1,15 @@
+{
+  "name": "approved-policy-sections-v1",
+  "description": "Approved fictional Northstar policy sections for the synthetic portfolio demonstration.",
+  "fields": [
+    { "name": "searchKey", "type": "Edm.String", "key": true, "filterable": true, "sortable": true },
+    { "name": "sourceId", "type": "Edm.String", "filterable": true, "sortable": true },
+    { "name": "documentTitle", "type": "Edm.String", "searchable": true, "filterable": true, "sortable": true },
+    { "name": "documentVersion", "type": "Edm.String", "filterable": true },
+    { "name": "sectionLabel", "type": "Edm.String", "searchable": true, "filterable": true },
+    { "name": "programCode", "type": "Edm.String", "filterable": true, "facetable": true },
+    { "name": "content", "type": "Edm.String", "searchable": true },
+    { "name": "isApproved", "type": "Edm.Boolean", "filterable": true },
+    { "name": "isSynthetic", "type": "Edm.Boolean", "filterable": true }
+  ]
+}

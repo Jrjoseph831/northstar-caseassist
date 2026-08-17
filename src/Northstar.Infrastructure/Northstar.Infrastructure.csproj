@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <ProjectReference Include="../Northstar.Domain/Northstar.Domain.csproj" />
+    <ProjectReference Include="../Northstar.Application/Northstar.Application.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Northstar.Domain/Northstar.Domain.csproj" />
+  </ItemGroup>
+</Project>

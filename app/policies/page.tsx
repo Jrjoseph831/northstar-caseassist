@@ -1,0 +1,131 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+
+type PolicySection = {
+  id: string;
+  documentTitle: string;
+  documentVersion: string;
+  sectionLabel: string;
+  programCode: string;
+  content: string;
+};
+
+type PolicyDocument = {
+  title: string;
+  version: string;
+  sections: PolicySection[];
+};
+
+const programLabels: Record<string, string> = {
+  ALL: "All programs",
+  UTILITY_RELIEF: "Utility Relief",
+  HOUSING_STABILITY: "Housing Stability",
+  WORKFORCE_TRAINING: "Workforce Training",
+};
+
+export default function Policies() {
+  const [sections, setSections] = useState<PolicySection[]>([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [active, setActive] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await fetch("/api/policies");
+        const data = (await response.json()) as {
+          sections?: PolicySection[];
+          error?: string;
+        };
+        if (!response.ok) throw new Error(data.error ?? "Could not load policies.");
+        setSections(data.sections ?? []);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "Could not load policies.");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // Scroll to and highlight the section named in the URL hash (e.g. /policies#URP-4.2).
+  useEffect(() => {
+    if (loading) return;
+    const id = decodeURIComponent(window.location.hash.replace("#", ""));
+    if (!id) return;
+    setActive(id);
+    const node = document.getElementById(id);
+    if (node) node.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [loading]);
+
+  const documents = useMemo<PolicyDocument[]>(() => {
+    const byTitle = new Map<string, PolicyDocument>();
+    for (const section of sections) {
+      const existing = byTitle.get(section.documentTitle);
+      if (existing) existing.sections.push(section);
+      else
+        byTitle.set(section.documentTitle, {
+          title: section.documentTitle,
+          version: section.documentVersion,
+          sections: [section],
+        });
+    }
+    return [...byTitle.values()];
+  }, [sections]);
+
+  return (
+    <main className="policy-shell">
+      <a className="skip-link" href="#policy-main">
+        Skip to main content
+      </a>
+      <header className="policy-topbar">
+        <div>
+          <p className="eyebrow">NORTHSTAR PUBLIC SERVICES / POLICY LIBRARY</p>
+          <h1>Approved policy &amp; program guides</h1>
+        </div>
+        <a className="policy-back" href="/">
+          ← Back to workspace
+        </a>
+      </header>
+
+      <section id="policy-main" tabIndex={-1} className="policy-body">
+        <p className="policy-intro">
+          These are the approved program guides, verification standards, and
+          privacy/data-handling policies CaseAssist retrieves and cites. The assistant
+          may only ground answers in this corpus; every citation links back to the exact
+          section below. Fictional demonstration policies.
+        </p>
+
+        {loading && <p className="policy-muted">Loading policy corpus…</p>}
+        {error && <p className="policy-error">{error}</p>}
+
+        {documents.map((document) => (
+          <article key={document.title} className="policy-doc">
+            <div className="policy-doc-head">
+              <h2>{document.title}</h2>
+              <span>Version {document.version}</span>
+            </div>
+            {document.sections.map((section) => (
+              <div
+                key={section.id}
+                id={section.id}
+                className={active === section.id ? "policy-section active" : "policy-section"}
+              >
+                <div className="policy-section-head">
+                  <strong>{section.sectionLabel}</strong>
+                  <span className="policy-tags">
+                    <span className="policy-id">{section.id}</span>
+                    <span className="policy-program">
+                      {programLabels[section.programCode] ?? section.programCode}
+                    </span>
+                  </span>
+                </div>
+                <p>{section.content}</p>
+              </div>
+            ))}
+          </article>
+        ))}
+      </section>
+    </main>
+  );
+}

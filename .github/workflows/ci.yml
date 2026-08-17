@@ -1,0 +1,93 @@
+name: Northstar CI and controlled Azure deployment
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      deploy_azure:
+        description: Deploy the verified image to the Northstar dev environment
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet restore Northstar.slnx
+      - run: dotnet build Northstar.slnx --configuration Release --no-restore
+      - run: dotnet test Northstar.slnx --configuration Release --no-build
+      - run: dotnet list Northstar.slnx package --vulnerable --include-transitive
+
+  infrastructure-and-secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: azure/cli@v2
+        with:
+          inlineScript: az bicep build --file infrastructure/bicep/container-app.bicep --stdout >/dev/null
+      - name: Reject common committed secret formats
+        shell: bash
+        run: |
+          if git grep -nE '(sk-proj-[A-Za-z0-9_-]{40,}|Password=[^;$]{8,}|BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY)' -- ':!tests/rendered-html.test.mjs'; then
+            echo 'Potential secret detected in tracked source.' >&2
+            exit 1
+          fi
+
+  deploy-azure:
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_azure
+    needs: [frontend, backend, infrastructure-and-secrets]
+    runs-on: ubuntu-latest
+    environment: northstar-dev
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NORTHSTAR_BFF_SHARED_SECRET: ${{ secrets.NORTHSTAR_BFF_SHARED_SECRET }}
+      NORTHSTAR_SQL_CONNECTION_STRING: ${{ secrets.NORTHSTAR_SQL_CONNECTION_STRING }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Build and publish immutable API image
+        shell: bash
+        run: |
+          az acr login --name acrnorthstardevta542fwh
+          docker build -t "acrnorthstardevta542fwh.azurecr.io/northstar-api:${GITHUB_SHA}" .
+          docker push "acrnorthstardevta542fwh.azurecr.io/northstar-api:${GITHUB_SHA}"
+      - name: Deploy verified Azure revision
+        shell: bash
+        run: |
+          az deployment group create \
+            --resource-group rg-northstar-caseassist-dev \
+            --name "northstar-${GITHUB_RUN_ID}" \
+            --template-file infrastructure/bicep/container-app.bicep \
+            --parameters infrastructure/bicep/container-app.dev.bicepparam \
+            --parameters imageTag="${GITHUB_SHA}"

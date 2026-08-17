@@ -1,0 +1,343 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "14872019187766447160"
+    }
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Primary Azure region for the portfolio deployment."
+      }
+    },
+    "environment": {
+      "type": "string",
+      "defaultValue": "dev",
+      "allowedValues": [
+        "dev",
+        "demo"
+      ]
+    },
+    "owner": {
+      "type": "string"
+    },
+    "bffSharedSecret": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Shared server-to-server credential accepted only from the Sites BFF."
+      }
+    },
+    "sitesOrigin": {
+      "type": "string",
+      "defaultValue": "https://northstar-caseassist-demo.falajoe.chatgpt.site"
+    },
+    "deploySql": {
+      "type": "bool",
+      "defaultValue": false
+    },
+    "deploySearch": {
+      "type": "bool",
+      "defaultValue": false
+    },
+    "deployContentSafety": {
+      "type": "bool",
+      "defaultValue": false
+    },
+    "sqlAdministratorLogin": {
+      "type": "securestring",
+      "defaultValue": ""
+    },
+    "sqlAdministratorPassword": {
+      "type": "securestring",
+      "defaultValue": ""
+    }
+  },
+  "variables": {
+    "suffix": "[toLower(substring(uniqueString(subscription().subscriptionId, resourceGroup().id), 0, 8))]",
+    "baseName": "[format('northstar-{0}-{1}', parameters('environment'), variables('suffix'))]",
+    "commonTags": {
+      "project": "NorthstarCaseAssist",
+      "environment": "[parameters('environment')]",
+      "owner": "[parameters('owner')]",
+      "synthetic-data-only": "true",
+      "cost-center": "student-portfolio"
+    },
+    "sqliteSettings": [
+      {
+        "name": "Database__Provider",
+        "value": "Sqlite"
+      },
+      {
+        "name": "ConnectionStrings__Northstar",
+        "value": "Data Source=/home/data/northstar.db"
+      }
+    ]
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2025-01-01",
+      "name": "[replace(format('st{0}', variables('baseName')), '-', '')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "sku": {
+        "name": "Standard_LRS"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "accessTier": "Hot",
+        "allowBlobPublicAccess": false,
+        "allowCrossTenantReplication": false,
+        "defaultToOAuthAuthentication": true,
+        "minimumTlsVersion": "TLS1_2",
+        "publicNetworkAccess": "Enabled",
+        "supportsHttpsTrafficOnly": true
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2025-01-01",
+      "name": "[format('{0}/{1}', replace(format('st{0}', variables('baseName')), '-', ''), 'default')]",
+      "properties": {
+        "deleteRetentionPolicy": {
+          "enabled": true,
+          "days": 7
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', replace(format('st{0}', variables('baseName')), '-', ''))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2025-01-01",
+      "name": "[format('{0}/{1}/{2}', replace(format('st{0}', variables('baseName')), '-', ''), 'default', 'case-documents')]",
+      "properties": {
+        "publicAccess": "None"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', replace(format('st{0}', variables('baseName')), '-', ''), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2025-01-01",
+      "name": "[format('{0}/{1}/{2}', replace(format('st{0}', variables('baseName')), '-', ''), 'default', 'approved-policies')]",
+      "properties": {
+        "publicAccess": "None"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', replace(format('st{0}', variables('baseName')), '-', ''), 'default')]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/serverfarms",
+      "apiVersion": "2024-11-01",
+      "name": "[format('plan-{0}', variables('baseName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "kind": "linux",
+      "sku": {
+        "name": "F1",
+        "tier": "Free",
+        "capacity": 1
+      },
+      "properties": {
+        "reserved": true
+      }
+    },
+    {
+      "condition": "[parameters('deploySql')]",
+      "type": "Microsoft.Sql/servers",
+      "apiVersion": "2023-08-01",
+      "name": "[format('sql-{0}', variables('baseName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "properties": {
+        "administratorLogin": "[parameters('sqlAdministratorLogin')]",
+        "administratorLoginPassword": "[parameters('sqlAdministratorPassword')]",
+        "minimalTlsVersion": "1.2",
+        "publicNetworkAccess": "Enabled",
+        "restrictOutboundNetworkAccess": "Disabled"
+      }
+    },
+    {
+      "condition": "[parameters('deploySql')]",
+      "type": "Microsoft.Sql/servers/firewallRules",
+      "apiVersion": "2023-08-01",
+      "name": "[format('{0}/{1}', format('sql-{0}', variables('baseName')), 'AllowAzureServices')]",
+      "properties": {
+        "startIpAddress": "0.0.0.0",
+        "endIpAddress": "0.0.0.0"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', format('sql-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deploySql')]",
+      "type": "Microsoft.Sql/servers/databases",
+      "apiVersion": "2025-01-01",
+      "name": "[format('{0}/{1}', format('sql-{0}', variables('baseName')), 'northstar')]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "sku": {
+        "name": "GP_S_Gen5",
+        "tier": "GeneralPurpose",
+        "family": "Gen5",
+        "capacity": 2
+      },
+      "properties": {
+        "autoPauseDelay": 60,
+        "freeLimitExhaustionBehavior": "AutoPause",
+        "licenseType": "LicenseIncluded",
+        "maxSizeBytes": 34359738368,
+        "minCapacity": "[json('0.5')]",
+        "requestedBackupStorageRedundancy": "Local",
+        "useFreeLimit": true,
+        "zoneRedundant": false
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Sql/servers', format('sql-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2024-11-01",
+      "name": "[format('api-{0}', variables('baseName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "kind": "app,linux",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "enabled": true,
+        "httpsOnly": true,
+        "publicNetworkAccess": "Enabled",
+        "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', format('plan-{0}', variables('baseName')))]",
+        "siteConfig": {
+          "alwaysOn": false,
+          "appSettings": "[concat(createArray(createObject('name', 'ASPNETCORE_ENVIRONMENT', 'value', 'Production'), createObject('name', 'Northstar__DemoMode', 'value', 'true'), createObject('name', 'Security__AllowedOrigins__0', 'value', parameters('sitesOrigin')), createObject('name', 'Security__BffSharedSecret', 'value', parameters('bffSharedSecret')), createObject('name', 'Storage__AccountName', 'value', replace(format('st{0}', variables('baseName')), '-', '')), createObject('name', 'Search__Provider', 'value', if(parameters('deploySearch'), 'AzureAiSearch', 'Database')), createObject('name', 'Search__Endpoint', 'value', if(parameters('deploySearch'), format('https://{0}.search.windows.net', format('search-{0}', variables('baseName'))), '')), createObject('name', 'Search__IndexName', 'value', 'approved-policy-sections-v1'), createObject('name', 'WEBSITE_RUN_FROM_PACKAGE', 'value', '1')), if(parameters('deploySql'), createArray(createObject('name', 'Database__Provider', 'value', 'SqlServer'), createObject('name', 'ConnectionStrings__Northstar', 'value', format('Server=tcp:{0},1433;Initial Catalog={1};Persist Security Info=False;User ID={2};Password={3};MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;', reference(resourceId('Microsoft.Sql/servers', format('sql-{0}', variables('baseName'))), '2023-08-01').fullyQualifiedDomainName, 'northstar', parameters('sqlAdministratorLogin'), parameters('sqlAdministratorPassword')))), variables('sqliteSettings')))]",
+          "ftpsState": "Disabled",
+          "http20Enabled": true,
+          "linuxFxVersion": "DOTNETCORE|10.0",
+          "minTlsVersion": "1.2",
+          "scmMinTlsVersion": "1.2",
+          "use32BitWorkerProcess": true
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/serverfarms', format('plan-{0}', variables('baseName')))]",
+        "[resourceId('Microsoft.Search/searchServices', format('search-{0}', variables('baseName')))]",
+        "[resourceId('Microsoft.Sql/servers/databases', format('sql-{0}', variables('baseName')), 'northstar')]",
+        "[resourceId('Microsoft.Sql/servers', format('sql-{0}', variables('baseName')))]",
+        "[resourceId('Microsoft.Storage/storageAccounts', replace(format('st{0}', variables('baseName')), '-', ''))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Storage/storageAccounts', replace(format('st{0}', variables('baseName')), '-', ''))]",
+      "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', replace(format('st{0}', variables('baseName')), '-', '')), resourceId('Microsoft.Web/sites', format('api-{0}', variables('baseName'))), 'Storage Blob Data Contributor')]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', format('api-{0}', variables('baseName'))), '2024-11-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'ba92f5b4-2d11-453d-a403-e96b0029c9fe')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', replace(format('st{0}', variables('baseName')), '-', ''))]",
+        "[resourceId('Microsoft.Web/sites', format('api-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deploySearch')]",
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Search/searchServices', format('search-{0}', variables('baseName')))]",
+      "name": "[guid(resourceId('Microsoft.Search/searchServices', format('search-{0}', variables('baseName'))), resourceId('Microsoft.Web/sites', format('api-{0}', variables('baseName'))), 'Search Index Data Reader')]",
+      "properties": {
+        "principalId": "[reference(resourceId('Microsoft.Web/sites', format('api-{0}', variables('baseName'))), '2024-11-01', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal",
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '1407120a-92aa-4202-b7e9-c0e197c71c8f')]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Search/searchServices', format('search-{0}', variables('baseName')))]",
+        "[resourceId('Microsoft.Web/sites', format('api-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deploySearch')]",
+      "type": "Microsoft.Search/searchServices",
+      "apiVersion": "2025-05-01",
+      "name": "[format('search-{0}', variables('baseName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "sku": {
+        "name": "free"
+      },
+      "properties": {
+        "authOptions": {
+          "aadOrApiKey": {
+            "aadAuthFailureMode": "http401WithBearerChallenge"
+          }
+        },
+        "disableLocalAuth": false,
+        "hostingMode": "Default",
+        "partitionCount": 1,
+        "publicNetworkAccess": "enabled",
+        "replicaCount": 1,
+        "semanticSearch": "disabled"
+      }
+    },
+    {
+      "condition": "[parameters('deployContentSafety')]",
+      "type": "Microsoft.CognitiveServices/accounts",
+      "apiVersion": "2024-10-01",
+      "name": "[format('safety-{0}', variables('baseName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[variables('commonTags')]",
+      "kind": "ContentSafety",
+      "sku": {
+        "name": "F0"
+      },
+      "properties": {
+        "customSubDomainName": "[format('safety-{0}', variables('baseName'))]",
+        "disableLocalAuth": false,
+        "publicNetworkAccess": "Enabled"
+      }
+    }
+  ],
+  "outputs": {
+    "apiName": {
+      "type": "string",
+      "value": "[format('api-{0}', variables('baseName'))]"
+    },
+    "apiUrl": {
+      "type": "string",
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', format('api-{0}', variables('baseName'))), '2024-11-01').defaultHostName)]"
+    },
+    "storageAccountName": {
+      "type": "string",
+      "value": "[replace(format('st{0}', variables('baseName')), '-', '')]"
+    },
+    "databaseName": {
+      "type": "string",
+      "value": "[if(parameters('deploySql'), 'northstar', '')]"
+    },
+    "searchServiceName": {
+      "type": "string",
+      "value": "[if(parameters('deploySearch'), format('search-{0}', variables('baseName')), '')]"
+    },
+    "contentSafetyName": {
+      "type": "string",
+      "value": "[if(parameters('deployContentSafety'), format('safety-{0}', variables('baseName')), '')]"
+    }
+  }
+}

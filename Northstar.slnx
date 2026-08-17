@@ -1,0 +1,10 @@
+<Solution>
+  <Project Path="src/Northstar.Api/Northstar.Api.csproj" />
+  <Project Path="src/Northstar.Application/Northstar.Application.csproj" />
+  <Project Path="src/Northstar.Domain/Northstar.Domain.csproj" />
+  <Project Path="src/Northstar.Infrastructure/Northstar.Infrastructure.csproj" />
+  <Folder Name="/tests/">
+    <Project Path="tests/Northstar.IntegrationTests/Northstar.IntegrationTests.csproj" />
+    <Project Path="tests/Northstar.UnitTests/Northstar.UnitTests.csproj" />
+  </Folder>
+</Solution>
