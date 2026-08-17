@@ -37,14 +37,6 @@
     "**/*.mts"
   ],
   "exclude": [
-    "node_modules",
-    "build",
-    "db",
-    "drizzle.config.ts",
-    "drizzle",
-    "examples",
-    "lib/northstar.ts",
-    "vite.config.ts",
-    "worker"
+    "node_modules"
   ]
 }
