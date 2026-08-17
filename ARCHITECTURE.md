@@ -1,79 +1,58 @@
-# Northstar CaseAssist — System Architecture
+# Architecture
 
-Responsible‑AI casework assistant. Core thesis: **redact on the way in, ground in approved
-policy, validate on the way out, and never let the AI make the decision — a human does, and
-every step is audited.**
+**The whole idea in one line:** redact on the way in, ground every answer in approved policy,
+check it on the way out, and let a human — never the AI — make the call. Every step is logged.
 
----
-
-## 1. Deployment topology & trust boundaries
-
-![Deployment topology and trust boundaries](docs/diagrams/diagram-1.png)
-
-**Trust boundary 1** = browser → Vercel (no secret ever in the browser).
-**Trust boundary 2** = Vercel BFF → Azure API (shared secret + persona header). The API only
-accepts traffic that presents the shared secret.
+Three diagrams: how it's built, how it's secured, and how the AI is kept in line.
 
 ---
 
-## 2. Enterprise security envelope — where the data is protected
+## How it's built
 
-The application runs **inside the agency's own Azure tenant**, under the company's existing
-identity, logging, and cybersecurity controls. Protection is layered, so no single point
-carries the whole burden — and case data (including an SSN in a case record) is scoped to the
-**assigned caseworker only**, never broadly visible and never sent to the AI.
+![Deployment topology](docs/diagrams/diagram-1.png)
 
-![Enterprise security envelope](docs/diagrams/diagram-2.png)
+The browser never holds a secret. It talks to a **Next.js BFF on Vercel**, which is the only
+place the API secret lives. The BFF calls the **.NET API on Azure**, which does the real work and
+reaches the data and AI services. Two trust boundaries: browser → Vercel, and Vercel → Azure
+(the API answers only to callers that present the secret).
 
-| Layer | Control | Enforced where |
-|---|---|---|
-| **Identity** | Entra ID, MFA, app role from AD security groups | Company IAM platform (the demo stubs identity as a persona switch; the authorization that consumes it is real) |
-| **Access (need-to-know)** | Caseworker → only assigned cases; reviewer → only assigned reviews; separation of duties | Application, **server-side, today** (`AssignedWorkerId == actor.UserId`; denials audited) |
-| **Data protection** | PII redaction before the model; TDE at rest; TLS in transit; managed identity (no stored secrets) | Application + Azure, **today** |
-| **Monitoring & audit** | Append-only audit trail of every access → company SIEM; Azure Monitor / App Insights | Audit **today**; SIEM ingestion in production |
-| **Platform perimeter** | Azure Policy / security baseline, private networking, WAF/APIM, per-user rate & budget limits | Rate/budget **today**; network/WAF in production |
+## How it's secured
 
-**On the SSN specifically:** it is stored in the case record (Azure SQL, encrypted at rest),
-visible only to the caseworker the case is assigned to, and **stripped by the PII redactor
-before any request reaches the AI** — so it satisfies casework need-to-know while never
-entering the model or the model provider's logs.
+![Security envelope](docs/diagrams/diagram-2.png)
 
----
+Five layers, so no single control carries the whole load. A case — including its SSN — is scoped
+to the **one caseworker it's assigned to**, encrypted at rest, and stripped before it ever
+reaches the AI. Document *contents* stay in Blob storage and never go to the model; only the
+document *type* is used to spot what's missing.
 
-## 3. The governed CaseAssist pipeline
+| Layer | Control |
+|---|---|
+| **Identity** | Entra ID, MFA, app roles from AD groups |
+| **Access** | Need-to-know, enforced server-side (`AssignedWorkerId == actor.UserId`) |
+| **Data** | PII redacted before the model · encrypted at rest · TLS in transit · managed identity |
+| **Monitoring** | Append-only audit trail → company SIEM + Azure Monitor |
+| **Perimeter** | Azure Policy, private networking, WAF/APIM, rate + budget limits |
 
-Fires on **Ask CaseAssist**. This is the control flow that makes the assistant safe to deploy —
-identity and need-to-know authorization, PII redaction, prompt-injection scan, policy-grounded
-generation, citation validation, output PII and content-safety checks, risk classification, and
-human-review routing. **Every numbered step writes an audit event.**
+The demo stands in for identity with a persona switch, but the authorization that consumes it is
+real and runs server-side.
 
-![The governed CaseAssist pipeline](docs/diagrams/diagram-3.png)
+## How the AI is kept in line
 
----
+![Governed pipeline](docs/diagrams/diagram-3.png)
 
-## Access control & separation of duties
-
-Enforced server-side, not by hiding buttons: caseworkers see only their own cases; reviewers
-decide only items assigned to them; a submitter can never approve their own item; only admins
-read audit events or run evaluations. Personas map to roles (`maya.chen` → Caseworker,
-`marcus.reed` → Reviewer, `priya.shah` → Administrator); in production these come from Entra ID
-app roles rather than a persona switch.
-
-## Data & document handling
-
-Case data lives in Azure SQL (system of record, encrypted at rest). The case background fed to
-the model is a `CaseNote` that is **redacted first**. Document **content** lives in Blob storage
-and is never sent to the model — only the document *type* (from the filename) is used for the
-missing-document gap analysis.
+Every request runs the same gauntlet. It's authorized, PII-redacted, and grounded in retrieved
+policy *before* the model runs. The draft that comes back is checked for invented citations,
+leaked PII, unsafe content, and decision language like "approved" or "denied." Clean drafts go to
+the caseworker; anything flagged routes to a **separate human reviewer** — never the person who
+asked. The AI can draft, but it can't decide.
 
 ---
 
-## Environments
+## Where it runs
 
-| Layer | Value |
+| | |
 | --- | --- |
-| Frontend | `https://northstar-caseassist.vercel.app` (Vercel, Next.js standalone) |
-| API | Azure Container App `aca-northstar-api-dev-ta542fwh` (.NET 10) |
-| Image | `acrnorthstardevta542fwh.azurecr.io/northstar-api:dev-20260816-11` |
-| Model | OpenAI `gpt-5-mini`, Responses API, strict JSON schema |
-| Data | Azure SQL · Blob · AI Search · AI Content Safety · App Insights |
+| Frontend | `northstar-caseassist.vercel.app` — Next.js on Vercel |
+| API | Azure Container App — .NET 10 |
+| Model | OpenAI `gpt-5-mini` — Responses API, strict JSON schema |
+| Data | Azure SQL · Blob · AI Search · Content Safety · App Insights |

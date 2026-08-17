@@ -1,26 +1,7 @@
 flowchart TB
-    USER["Caseworker · Reviewer · Administrator"]
-
-    subgraph L1["1 - Identity (company IAM)"]
-        ENTRA["Microsoft Entra ID · MFA · conditional access<br/>app roles mapped from AD security groups"]
-    end
-    subgraph L2["2 - Access: need-to-know, enforced server-side"]
-        SCOPE["Caseworker sees ONLY assigned cases<br/>Reviewer sees ONLY assigned reviews<br/>Submitter cannot approve own item · admin-only governance"]
-    end
-    subgraph L3["3 - Data protection"]
-        REDACT["PII redaction before AI — SSN / name / contact removed"]
-        ENC["Encryption at rest (TDE) + TLS in transit<br/>Managed identity — no stored credentials"]
-    end
-    subgraph L4["4 - Monitoring and audit"]
-        AUD["Append-only audit trail — every access, correlation + request id"]
-        SIEM["to company SIEM (Sentinel / Defender) + Azure Monitor"]
-    end
-    subgraph L5["5 - Platform perimeter"]
-        PLAT["Azure Policy · security baseline · private networking<br/>WAF / APIM · per-user rate + budget limits"]
-    end
-
-    USER --> ENTRA --> SCOPE
-    SCOPE --> REDACT --> ENC
-    ENC --> AUD --> SIEM
-    PLAT -. governs .- L3
-    PLAT -. governs .- L4
+    U["Caseworker · Reviewer · Admin"] --> I
+    I["1 · Identity — Entra ID, MFA"] --> AC
+    AC["2 · Access — need-to-know, server-side"] --> D
+    D["3 · Data — PII redaction, encryption"] --> M
+    M["4 · Monitoring — audit trail → SIEM"] --> P
+    P["5 · Perimeter — Azure Policy, WAF, limits"]

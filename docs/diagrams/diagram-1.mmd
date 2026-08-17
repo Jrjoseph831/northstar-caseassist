@@ -1,35 +1,14 @@
-flowchart TD
-    subgraph BROWSER["Browser — React SPA (app/page.tsx)"]
-        UI["Persona picker · Case workspace<br/>Review queue · Governance"]
+flowchart LR
+    U["Caseworker<br/>(browser)"]
+    subgraph V["Vercel"]
+        BFF["Next.js BFF<br/>holds the API secret"]
     end
-
-    subgraph VERCEL["Vercel — northstar-caseassist.vercel.app"]
-        CLIENT["Client bundle (page.tsx)"]
-        BFF["BFF route handlers (server-only)<br/>/api/cases /api/assistant /api/documents<br/>/api/intake /api/reviews /api/governance<br/>holds NORTHSTAR_BFF_SHARED_SECRET"]
+    subgraph A["Azure"]
+        API[".NET API<br/>auth · governance · audit"]
+        SVC["SQL · Blob · AI Search<br/>OpenAI · Content Safety"]
     end
-
-    subgraph AZURE["Azure Container App — .NET 10 minimal API"]
-        EDGE["Edge middleware<br/>constant-time secret check · CORS · 60 rpm/user"]
-        EP["Endpoints<br/>SystemOfRecord · CaseAssist · Documents"]
-    end
-
-    SQL[("Azure SQL<br/>system of record")]
-    BLOB[("Azure Blob<br/>document content")]
-    SEARCH[("Azure AI Search<br/>approved policy index")]
-    OPENAI["OpenAI Responses<br/>gpt-5-mini · structured JSON"]
-    SAFETY["Azure AI Content Safety"]
-    INSIGHTS["Application Insights"]
-
-    UI -->|"HTTPS same-origin"| CLIENT
-    CLIENT -->|"fetch /api/*"| BFF
-    BFF -->|"HTTPS + X-Northstar-Bff-Key<br/>+ X-Northstar-Demo-User + correlation-id"| EDGE
-    EDGE --> EP
-    EP --> SQL
-    EP --> BLOB
-    EP --> SEARCH
-    EP --> OPENAI
-    EP --> SAFETY
-    EP --> INSIGHTS
-
-    classDef boundary fill:#eef7f5,stroke:#0b3039,stroke-width:1px;
-    class BROWSER,VERCEL,AZURE boundary;
+    U -->|"HTTPS"| BFF
+    BFF -->|"secret + identity"| API
+    API --> SVC
+    classDef b fill:#eef7f5,stroke:#0b3039;
+    class V,A b;
