@@ -12,7 +12,7 @@ record and processes no real personal information.
 
 - **Live demo:** https://northstar-caseassist.vercel.app
 - **Architecture:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
-- **Governance one-pager:** [`docs/ai-governance-summary.md`](docs/ai-governance-summary.md)
+- **Governance:** [`docs/ai-governance-summary.md`](docs/ai-governance-summary.md)
 
 ---
 
@@ -106,7 +106,7 @@ confirmation `DELETE SYNTHETIC DATA` and only deletes records flagged `isSynthet
 ## Documentation
 
 - [Architecture & data flow](ARCHITECTURE.md)
-- [**AI governance summary (NIST AI RMF)**](docs/ai-governance-summary.md)
+- [**Governance**](docs/ai-governance-summary.md)
 - [AI system card](docs/ai-system-card.md)
 - [STRIDE threat model](docs/threat-model.md)
 - [Controls, classification & retention](docs/controls-and-data.md)
