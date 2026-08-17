@@ -8,7 +8,7 @@ every step is audited.**
 
 ## 1. Deployment topology & trust boundaries
 
-![1. Deployment topology & trust boundaries](docs/diagrams/diagram-1.png)
+![Deployment topology and trust boundaries](docs/diagrams/diagram-1.png)
 
 **Trust boundary 1** = browser → Vercel (no secret ever in the browser).
 **Trust boundary 2** = Vercel BFF → Azure API (shared secret + persona header). The API only
@@ -23,7 +23,7 @@ identity, logging, and cybersecurity controls. Protection is layered, so no sing
 carries the whole burden — and case data (including an SSN in a case record) is scoped to the
 **assigned caseworker only**, never broadly visible and never sent to the AI.
 
-![2. Enterprise security envelope — where the data is protected](docs/diagrams/diagram-2.png)
+![Enterprise security envelope](docs/diagrams/diagram-2.png)
 
 | Layer | Control | Enforced where |
 |---|---|---|
@@ -42,40 +42,29 @@ entering the model or the model provider's logs.
 
 ## 3. The governed CaseAssist pipeline
 
-Fires on **Ask CaseAssist**. Every numbered step writes an audit event.
+Fires on **Ask CaseAssist**. This is the control flow that makes the assistant safe to deploy —
+identity and need-to-know authorization, PII redaction, prompt-injection scan, policy-grounded
+generation, citation validation, output PII and content-safety checks, risk classification, and
+human-review routing. **Every numbered step writes an audit event.**
 
-![3. The governed CaseAssist pipeline](docs/diagrams/diagram-3.png)
-
----
-
-## 4. Request sequence (who calls whom)
-
-![4. Request sequence (who calls whom)](docs/diagrams/diagram-4.png)
+![The governed CaseAssist pipeline](docs/diagrams/diagram-3.png)
 
 ---
 
-## 5. Roles, persona routing & separation of duties
+## Access control & separation of duties
 
-![5. Roles, persona routing & separation of duties](docs/diagrams/diagram-5.png)
+Enforced server-side, not by hiding buttons: caseworkers see only their own cases; reviewers
+decide only items assigned to them; a submitter can never approve their own item; only admins
+read audit events or run evaluations. Personas map to roles (`maya.chen` → Caseworker,
+`marcus.reed` → Reviewer, `priya.shah` → Administrator); in production these come from Entra ID
+app roles rather than a persona switch.
 
-Enforced server-side: caseworkers see only their own cases; reviewers decide only items
-assigned to them; a submitter can never approve their own item; only admins read audit
-events or run evaluations.
+## Data & document handling
 
----
-
-## 6. Data model (Azure SQL — all rows synthetic)
-
-![6. Data model (Azure SQL — all rows synthetic)](docs/diagrams/diagram-6.png)
-
-`CaseNote` of type `CaseBackground` is the (redacted) text fed to the model as context.
-Document **content** lives in Blob and is never sent to the model — only the type (filename).
-
----
-
-## 7. PII & decision gates
-
-![7. PII & decision gates](docs/diagrams/diagram-7.png)
+Case data lives in Azure SQL (system of record, encrypted at rest). The case background fed to
+the model is a `CaseNote` that is **redacted first**. Document **content** lives in Blob storage
+and is never sent to the model — only the document *type* (from the filename) is used for the
+missing-document gap analysis.
 
 ---
 
