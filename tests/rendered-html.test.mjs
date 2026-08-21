@@ -2,24 +2,23 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function worker() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}-${Math.random()}`);
-  return (await import(workerUrl.href)).default;
-}
+// The workspace is prerendered at build time, so the HTML Next.js will serve is on
+// disk after `npm run build`. Reading it keeps this a real check of the rendered
+// markup without starting a server.
+const prerenderedPage = new URL("../.next/server/app/index.html", import.meta.url);
 
-function executionContext() {
-  return { waitUntil() {}, passThroughOnException() {} };
+async function renderedHtml() {
+  try {
+    return await readFile(prerenderedPage, "utf8");
+  } catch (error) {
+    assert.fail(
+      `No prerendered page at .next/server/app/index.html — run "npm run build" before "npm test" (${error.code ?? error.message}).`,
+    );
+  }
 }
 
 test("server-renders the Northstar case workspace", async () => {
-  const response = await (await worker()).fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    executionContext(),
-  );
-  assert.equal(response.status, 200);
-  const html = await response.text();
+  const html = await renderedHtml();
   assert.match(html, /<title>Northstar CaseAssist<\/title>/);
   assert.match(html, /Case workspace/);
   assert.match(html, /Fictional records only/);
