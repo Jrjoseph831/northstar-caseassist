@@ -291,6 +291,7 @@ export default function Home() {
     "assistant",
   );
   const [documents, setDocuments] = useState<CaseDocument[]>([]);
+  const [documentsCaseId, setDocumentsCaseId] = useState("");
   const [documentRunning, setDocumentRunning] = useState(false);
   const [actionRunning, setActionRunning] = useState(false);
   const [pendingDecision, setPendingDecision] = useState<"Approve" | "Deny" | null>(
@@ -303,6 +304,11 @@ export default function Home() {
     [cases, selected],
   );
   const activeReview = reviews[0] ?? null;
+  // Documents belong to the case they were fetched for. Deriving the visible list from
+  // that pairing means switching cases shows an empty list straight away instead of the
+  // previous case's files until the next fetch lands, and it saves the effect below from
+  // clearing state on every case change.
+  const caseDocuments = documentsCaseId === (current.azureId ?? "") ? documents : [];
 
   // Load the real Azure caseload on first paint so the workspace opens on the full
   // caseload instead of the single placeholder card.
@@ -315,11 +321,7 @@ export default function Home() {
   // this, documents only loaded on a manual tab click and never refreshed when the case
   // changed, so the counter showed a stale/zero count even after intake attached files.
   useEffect(() => {
-    if (!current.azureId) {
-      setDocuments([]);
-      return;
-    }
-    void loadDocuments();
+    if (current.azureId) void loadDocuments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current.azureId]);
 
@@ -467,8 +469,10 @@ export default function Home() {
       documents?: CaseDocument[];
       error?: string;
     };
-    if (response.ok) setDocuments(data.documents ?? []);
-    else setMessage(data.error ?? "Could not load documents.");
+    if (response.ok) {
+      setDocuments(data.documents ?? []);
+      setDocumentsCaseId(current.azureId);
+    } else setMessage(data.error ?? "Could not load documents.");
   }
 
   async function uploadDocument(file: File) {
@@ -798,7 +802,7 @@ export default function Home() {
                     void loadDocuments();
                   }}
                 >
-                  Documents <span>{documents.length}</span>
+                  Documents <span>{caseDocuments.length}</span>
                 </button>
                 <button
                   className={caseTab === "activity" ? "active" : ""}
@@ -1079,9 +1083,9 @@ export default function Home() {
                       />
                     </label>
                   </div>
-                  {documents.length ? (
+                  {caseDocuments.length ? (
                     <div className="document-list">
-                      {documents.map((document) => (
+                      {caseDocuments.map((document) => (
                         <article key={document.id}>
                           <div>
                             <strong>{document.originalFileName}</strong>
