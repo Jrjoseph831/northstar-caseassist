@@ -10,5 +10,6 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <ProjectReference Include="../../src/Northstar.Application/Northstar.Application.csproj" />
+    <ProjectReference Include="../../src/Northstar.Infrastructure/Northstar.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

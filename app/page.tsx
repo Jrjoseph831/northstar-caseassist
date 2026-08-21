@@ -86,7 +86,28 @@ type Trace = {
     policySource: string | null;
     originalExcluded: boolean;
   };
-  retrieval: { searched: number; sections: string[] };
+  retrieval: {
+    searched: number;
+    sections: string[];
+    strategy: string | null;
+    queries: string[];
+    candidateCount: number;
+    denseModel: string | null;
+    denseDimensions: number;
+    denseIsLive: boolean;
+    sparseModel: string | null;
+    fusionMethod: string | null;
+    rerankModel: string | null;
+    elapsedMilliseconds: number;
+    ranking: Array<{
+      sourceId: string;
+      denseRank: number;
+      sparseRank: number;
+      fusionRank: number;
+      rerankScore: number;
+      finalRank: number;
+    }>;
+  };
   model: {
     name: string;
     promptVersion: string;
@@ -968,7 +989,40 @@ export default function Home() {
                         <span>✓ Prohibited values excluded from engine input</span>
                         <span>
                           ✓ {result.trace.retrieval.searched} approved policies searched
+                          {result.trace.retrieval.candidateCount > 0
+                            ? ` · ${result.trace.retrieval.candidateCount} candidates ranked`
+                            : ""}
                         </span>
+                        {result.trace.retrieval.queries.length > 1 && (
+                          <span>
+                            ◦ {result.trace.retrieval.queries.length} search queries (original
+                            plus {result.trace.retrieval.queries.length - 1} rewrites), results
+                            combined by {result.trace.retrieval.fusionMethod ?? "rank fusion"}
+                          </span>
+                        )}
+                        {result.trace.retrieval.denseModel && (
+                          <span>
+                            ◦ Hybrid search: {result.trace.retrieval.denseModel} (
+                            {result.trace.retrieval.denseDimensions}d vectors) +{" "}
+                            {result.trace.retrieval.sparseModel ?? "sparse terms"}
+                            {result.trace.retrieval.rerankModel
+                              ? `, reranked by ${result.trace.retrieval.rerankModel}`
+                              : ""}{" "}
+                            in {result.trace.retrieval.elapsedMilliseconds}ms
+                          </span>
+                        )}
+                        {result.trace.retrieval.ranking.length > 0 && (
+                          <span>
+                            ◦ Ranking:{" "}
+                            {result.trace.retrieval.ranking
+                              .filter((entry) => entry.finalRank > 0)
+                              .map(
+                                (entry) =>
+                                  `${entry.sourceId} (dense #${entry.denseRank}, terms #${entry.sparseRank}, fused #${entry.fusionRank})`,
+                              )
+                              .join(" · ")}
+                          </span>
+                        )}
                         <span>
                           Engine: {result.trace.model.name} · prompt{" "}
                           {result.trace.model.promptVersion}

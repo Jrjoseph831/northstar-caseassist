@@ -8,9 +8,14 @@ public sealed record PolicyHit(
     string Content,
     double Score);
 
+/// <summary>
+/// Selects the approved policy sections an answer may be grounded in. Implementations return
+/// both the chosen sections and a per-stage account of how they were chosen, which is what the
+/// safety trace shows an auditor.
+/// </summary>
 public interface IPolicyRetriever
 {
-    Task<IReadOnlyList<PolicyHit>> SearchAsync(
+    Task<PolicyRetrievalResult> SearchAsync(
         string programCode,
         string redactedQuestion,
         int take,

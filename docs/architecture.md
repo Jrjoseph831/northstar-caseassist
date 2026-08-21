@@ -48,8 +48,10 @@ sequenceDiagram
     UI->>API: Redacted-workflow request through BFF
     API->>SQL: Verify identity, role, and case assignment
     API->>API: Redact PII and detect injection patterns
-    API->>Search: Retrieve approved policy sections
-    Search-->>API: Exact source IDs and excerpts
+    API->>API: Expand the question into similar queries
+    API->>Search: Retrieve approved candidate sections
+    Search-->>API: Approved candidates for the program
+    API->>API: Dense + sparse search, rank fusion, late-interaction rerank
     API->>Model: Controlled prompt with redacted question and evidence
     Model-->>API: Draft, citations, and token usage
     API->>Safety: Analyze output
@@ -57,6 +59,53 @@ sequenceDiagram
     API->>SQL: Persist request, trace, review item, and audit events
     API-->>UI: Draft plus safe trace metadata
 ```
+
+## Retrieval pipeline
+
+Every answer is grounded in approved policy sections, and how those sections are
+chosen is part of the control surface. One keyword search of the caseworker's
+exact wording is not enough: caseworkers ask in caseworker language and the
+corpus is written in policy language.
+
+```mermaid
+flowchart TD
+    question["Redacted question"] --> expand["Generate similar queries\n(rule-based, or model when configured)"]
+    question --> pool["Approved candidate pool\nprogram-filtered, approved only"]
+    expand --> pool
+    pool --> dense["Dense vector search\ncosine over embeddings"]
+    pool --> sparse["Sparse BM25 search\nexact policy terms"]
+    dense --> fuse["Reciprocal rank fusion\nk = 60"]
+    sparse --> fuse
+    fuse --> rerank["Late-interaction rerank\nIDF-weighted MaxSim"]
+    rerank --> sources["Top sections + per-stage scores"]
+    sources --> model["Prompt with approved excerpts"]
+    sources --> trace["Safety trace"]
+```
+
+| Stage | What it contributes | Default |
+|---|---|---|
+| Query expansion | Rewrites the question into policy wording so a section is not missed for vocabulary reasons | Rule-based, 4 variants plus the original |
+| Dense search | Matches on meaning when wording differs | Local deterministic embedding, 256d; hosted embeddings when configured |
+| Sparse search | Matches the exact terms a policy turns on, which vectors blur | BM25, k1 = 1.4, b = 0.75 |
+| Fusion | Combines rankings that are on different scales, promoting what several searches agree on | Reciprocal rank fusion, k = 60 |
+| Reranking | Scores question tokens against section tokens instead of one blended vector | IDF-weighted MaxSim, 25% of the final score |
+
+Two deliberate choices are worth naming. First, the offline path uses a local
+deterministic embedding rather than a hosted one: it costs nothing, adds no
+network call, and returns the same vector every time, which is what makes an
+evaluation run reproducible. Setting `Retrieval:EmbeddingProvider` to `OpenAI`
+swaps in hosted embeddings, and a failed embedding call falls back to the local
+model for that request with the served model recorded in the trace.
+
+Second, fusion leads and reranking refines. Sweeping the rerank weight against
+the labeled question set showed recall and MRR falling once the reranker
+outvoted the agreement between searches — on a corpus this small, agreement is
+the stronger signal. The weight is configuration, not a constant, because that
+balance shifts as a corpus grows.
+
+When `Search:Provider` is `AzureAiSearch`, the service supplies the candidate
+pool and its own relevance ranking joins the fusion as one more ranked list; the
+dense, sparse, fusion and reranking stages run in the API either way.
 
 ## Trust boundaries
 

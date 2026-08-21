@@ -86,7 +86,32 @@ export async function POST(request: Request) {
         originalValuesExcluded: boolean;
         outputPiiDetected: boolean;
       };
-      retrieval: { approvedSectionsSearched: number; sources: unknown[] };
+      retrieval: {
+        approvedSectionsSearched: number;
+        strategy?: string;
+        candidateSource?: string;
+        queries?: string[];
+        candidateCount?: number;
+        dense?: { model: string; dimensions: number; isLive: boolean };
+        sparse?: { model: string };
+        fusion?: { method: string; constant: number };
+        rerank?: { model: string; depth: number };
+        queryExpansion?: {
+          provider: string;
+          isLive: boolean;
+          generatedQueries: number;
+        };
+        elapsedMilliseconds?: number;
+        ranking?: Array<{
+          sourceId: string;
+          denseRank: number;
+          sparseRank: number;
+          fusionRank: number;
+          rerankScore: number;
+          finalRank: number;
+        }>;
+        sources: unknown[];
+      };
       model: {
         provider: string;
         modelName: string;
@@ -154,6 +179,17 @@ export async function POST(request: Request) {
           retrieval: {
             searched: trace.retrieval.approvedSectionsSearched,
             sections: created.sources.map((source) => source.sourceId),
+            strategy: trace.retrieval.strategy ?? null,
+            queries: trace.retrieval.queries ?? [],
+            candidateCount: trace.retrieval.candidateCount ?? 0,
+            denseModel: trace.retrieval.dense?.model ?? null,
+            denseDimensions: trace.retrieval.dense?.dimensions ?? 0,
+            denseIsLive: trace.retrieval.dense?.isLive ?? false,
+            sparseModel: trace.retrieval.sparse?.model ?? null,
+            fusionMethod: trace.retrieval.fusion?.method ?? null,
+            rerankModel: trace.retrieval.rerank?.model ?? null,
+            elapsedMilliseconds: trace.retrieval.elapsedMilliseconds ?? 0,
+            ranking: trace.retrieval.ranking ?? [],
           },
           model: {
             name: trace.model.modelName,

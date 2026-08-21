@@ -6,7 +6,7 @@
 |---|---|---|
 | Assigned-case access | `DemoIdentityService` and case endpoint authorization | Allowed/denied API response and `case.access` audit event |
 | Minimum necessary model input | PII redactor and controlled model request | Redaction summary and safety trace |
-| Approved grounding | Azure Search retriever filtered to the approved index | Retrieved source IDs/excerpts and `policy.retrieve` event |
+| Approved grounding | `HybridPolicyRetriever` over an approved, program-filtered candidate pool | Retrieved source IDs/excerpts, per-stage ranking, and `policy.retrieve` event |
 | Citation integrity | `CitationValidator` | Validation result/reason codes in trace and audit |
 | Protected decision boundary | `RiskClassifier` | High-risk reason codes and persistent review item |
 | Separation of duties | Review decision endpoint | Submitter/reviewer IDs and rejected self-approval |

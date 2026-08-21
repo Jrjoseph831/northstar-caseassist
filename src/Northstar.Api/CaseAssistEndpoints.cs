@@ -175,12 +175,26 @@ public static class CaseAssistEndpoints
             + $"Documents on file that passed the safety scan (these are the document types provided for this case): {(safeDocumentTypes.Count > 0 ? string.Join("; ", safeDocumentTypes) : "none")}. "
             + $"Case background (synthetic, non-identifying): {(string.IsNullOrWhiteSpace(safeBackground) ? "none recorded" : safeBackground)}. "
             + "The list of documents on file is authoritative for what has been provided; the contents of each document are not supplied, so do not assert what a document says, only whether that document type is present.";
-        var sources = await retriever.SearchAsync(caseRecord.ProgramCode, redaction.RedactedText, 3, cancellationToken);
+        // Retrieval runs the full pipeline: the question is expanded into similar queries, each
+        // query is searched with both dense vectors and BM25 sparse vectors, the ranked lists are
+        // fused with reciprocal rank fusion, and the shortlist is reranked with late-interaction
+        // scoring. Every stage is recorded so the safety trace can show why a section was used.
+        var retrieval = await retriever.SearchAsync(caseRecord.ProgramCode, redaction.RedactedText, 3, cancellationToken);
+        var sources = retrieval.Hits;
+        var retrievalTrace = retrieval.Diagnostics;
         var searchedCount = await database.PolicySections.CountAsync(item => item.IsApproved && (item.ProgramCode == caseRecord.ProgramCode || item.ProgramCode == "ALL"), cancellationToken);
         auditEventIds.Add(await audit.WriteAsync(database, context, actor, "policy.retrieve", "AIRequest", requestId, sources.Count > 0 ? "Succeeded" : "Failed", sources.Count > 0 ? "APPROVED_SOURCES_RETRIEVED" : "NO_APPROVED_SOURCE", request.CaseId, requestId, metadata: new Dictionary<string, object?>
         {
             ["searchedCount"] = searchedCount,
-            ["retrievedSourceIds"] = sources.Select(item => item.SourceId).ToArray()
+            ["retrievedSourceIds"] = sources.Select(item => item.SourceId).ToArray(),
+            ["strategy"] = retrievalTrace.Strategy,
+            ["candidateSource"] = retrievalTrace.CandidateSource,
+            ["queryCount"] = retrievalTrace.Queries.Count,
+            ["candidateCount"] = retrievalTrace.CandidateCount,
+            ["denseModel"] = retrievalTrace.DenseModel,
+            ["sparseModel"] = retrievalTrace.SparseModel,
+            ["rerankModel"] = retrievalTrace.RerankModel,
+            ["elapsedMilliseconds"] = retrievalTrace.ElapsedMilliseconds
         }, cancellationToken: cancellationToken));
 
         var generation = await modelProvider.GenerateAsync(new ModelRequest(
@@ -199,6 +213,14 @@ public static class CaseAssistEndpoints
             ["estimatedCost"] = generation.EstimatedCost,
             ["isLive"] = generation.IsLive
         }, cancellationToken: cancellationToken));
+
+        // The safety trace is an audit artifact, and DHR-4.3 keeps unredacted prompts out of
+        // audit records. Retrieval itself runs on the policy-permitted redaction (phone, email
+        // and case reference are allowed to reach the AI); the copies stored in the trace have
+        // every identifier category removed, including the permitted ones.
+        var traceQueries = retrievalTrace.Queries
+            .Select(item => redactor.Redact(item).RedactedText)
+            .ToArray();
 
         var citationValidation = citationValidator.Validate(generation, sources);
         auditEventIds.Add(await audit.WriteAsync(database, context, actor, "citation.validate", "AIRequest", requestId, citationValidation.IsValid ? "Succeeded" : "Failed", citationValidation.IsValid ? "CITATIONS_VALID" : "CITATIONS_INVALID", request.CaseId, requestId, metadata: new Dictionary<string, object?>
@@ -241,7 +263,28 @@ public static class CaseAssistEndpoints
             retrieval = new
             {
                 approvedSectionsSearched = searchedCount,
-                sources = sources.Select(item => new { item.SourceId, item.DocumentTitle, item.DocumentVersion, item.SectionLabel, item.Content })
+                strategy = retrievalTrace.Strategy,
+                candidateSource = retrievalTrace.CandidateSource,
+                queries = traceQueries,
+                candidateCount = retrievalTrace.CandidateCount,
+                dense = new
+                {
+                    model = retrievalTrace.DenseModel,
+                    dimensions = retrievalTrace.DenseDimensions,
+                    isLive = retrievalTrace.DenseIsLive
+                },
+                sparse = new { model = retrievalTrace.SparseModel },
+                fusion = new { method = "reciprocal-rank-fusion", constant = retrievalTrace.FusionConstant },
+                rerank = new { model = retrievalTrace.RerankModel, depth = retrievalTrace.RerankDepth },
+                queryExpansion = new
+                {
+                    provider = retrievalTrace.QueryExpansionProvider,
+                    isLive = retrievalTrace.QueryExpansionIsLive,
+                    generatedQueries = retrievalTrace.Queries.Count
+                },
+                elapsedMilliseconds = retrievalTrace.ElapsedMilliseconds,
+                ranking = retrievalTrace.Ranking,
+                sources = sources.Select(item => new { item.SourceId, item.DocumentTitle, item.DocumentVersion, item.SectionLabel, item.Content, item.Score })
             },
             model = new
             {
@@ -489,6 +532,7 @@ public static class CaseAssistEndpoints
         DemoIdentityService identities,
         AuditWriter audit,
         ControlEvaluationRunner runner,
+        RagEvaluationRunner ragRunner,
         TimeProvider timeProvider,
         CancellationToken cancellationToken)
     {
@@ -499,12 +543,17 @@ public static class CaseAssistEndpoints
             return actor is null ? Unauthorized(context) : Forbidden(context, "Evaluations require the Administrator role.");
         }
 
-        var summary = runner.Run();
+        // Two dataset families in one run: the control checks prove the safety pipeline behaves,
+        // and the RAG checks measure whether retrieval and grounding are any good. Both have to
+        // pass for the system to be doing its job.
+        var controlSummary = runner.Run();
+        var ragSummary = await ragRunner.RunAsync(cancellationToken);
+        var summary = new EvaluationSummary([.. controlSummary.Checks, .. ragSummary.Checks]);
         var evaluation = new EvaluationRun
         {
             RunId = $"EVAL-{timeProvider.GetUtcNow():yyyyMMdd}-{Guid.NewGuid():N}",
-            EvaluationVersion = "controls-v2",
-            DatasetVersion = "golden-v2",
+            EvaluationVersion = "controls-and-rag-v3",
+            DatasetVersion = $"golden-v2+{RagGoldenDataset.Version}",
             PromptVersion = "northstar-prompt-v1",
             ModelVersion = "offline-fixture-v1",
             Total = summary.Total,

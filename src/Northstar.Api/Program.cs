@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Northstar.Application.Pii;
 using Northstar.Application.Assistant;
+using Northstar.Application.Assistant.Retrieval;
 using Northstar.Application.Evaluation;
 using Northstar.Application.Documents;
 using Northstar.Api;
@@ -24,23 +25,96 @@ if (!string.IsNullOrWhiteSpace(builder.Configuration["APPLICATIONINSIGHTS_CONNEC
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton<IPiiRedactor, DeterministicPiiRedactor>();
 builder.Services.AddSingleton<TokenCredential>(_ => new DefaultAzureCredential());
+// ---- Retrieval (RAG) ---------------------------------------------------------------
+// Multi-query expansion, dense + sparse hybrid search, reciprocal rank fusion and
+// late-interaction reranking run over whichever candidate store is configured.
 if (builder.Configuration["Search:Provider"] == "AzureAiSearch")
 {
     var endpoint = builder.Configuration["Search:Endpoint"]
         ?? throw new InvalidOperationException("Search:Endpoint is required for Azure AI Search.");
     var indexName = builder.Configuration["Search:IndexName"]
         ?? throw new InvalidOperationException("Search:IndexName is required for Azure AI Search.");
-    builder.Services.AddHttpClient<AzureSearchPolicyRetriever>();
-    builder.Services.AddScoped<IPolicyRetriever>(services => new AzureSearchPolicyRetriever(
-        services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(AzureSearchPolicyRetriever)),
+    builder.Services.AddHttpClient<AzureSearchPolicyCandidateSource>();
+    builder.Services.AddScoped<IPolicyCandidateSource>(services => new AzureSearchPolicyCandidateSource(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(AzureSearchPolicyCandidateSource)),
         services.GetRequiredService<TokenCredential>(),
         new Uri(endpoint),
         indexName));
 }
 else
 {
-    builder.Services.AddScoped<IPolicyRetriever, DatabasePolicyRetriever>();
+    builder.Services.AddScoped<IPolicyCandidateSource, DatabasePolicyCandidateSource>();
 }
+
+builder.Services.AddSingleton<HashedDenseEmbeddingProvider>();
+builder.Services.AddSingleton<PolicyVectorIndex>();
+builder.Services.AddSingleton<ILateInteractionReranker, LateInteractionReranker>();
+builder.Services.AddSingleton<DeterministicQueryExpander>();
+builder.Services.AddSingleton(new HybridRetrievalOptions
+{
+    QueryVariants = Math.Clamp(builder.Configuration.GetValue<int?>("Retrieval:QueryVariants") ?? 4, 0, 8),
+    CandidatePoolSize = Math.Clamp(builder.Configuration.GetValue<int?>("Retrieval:CandidatePoolSize") ?? 24, 1, 200),
+    RerankDepth = Math.Clamp(builder.Configuration.GetValue<int?>("Retrieval:RerankDepth") ?? 8, 1, 50),
+    FusionConstant = Math.Clamp(builder.Configuration.GetValue<int?>("Retrieval:FusionConstant") ?? 60, 1, 1_000),
+    RerankWeight = Math.Clamp(builder.Configuration.GetValue<double?>("Retrieval:RerankWeight") ?? 0.25, 0, 1),
+    UseQueryExpansion = builder.Configuration.GetValue<bool?>("Retrieval:UseQueryExpansion") ?? true,
+    UseReranking = builder.Configuration.GetValue<bool?>("Retrieval:UseReranking") ?? true
+});
+
+if (builder.Configuration["Retrieval:EmbeddingProvider"] == "OpenAI")
+{
+    var embeddingKey = builder.Configuration["Retrieval:EmbeddingApiKey"]
+        ?? builder.Configuration["AI:ApiKey"]
+        ?? throw new InvalidOperationException("Retrieval:EmbeddingApiKey or AI:ApiKey is required for hosted embeddings.");
+    var embeddingModel = builder.Configuration["Retrieval:EmbeddingModel"] ?? "text-embedding-3-small";
+    var embeddingDimensions = Math.Clamp(builder.Configuration.GetValue<int?>("Retrieval:EmbeddingDimensions") ?? 512, 64, 3_072);
+    builder.Services.AddHttpClient<OpenAIEmbeddingProvider>();
+    builder.Services.AddSingleton<IEmbeddingProvider>(services => new ResilientEmbeddingProvider(
+        new OpenAIEmbeddingProvider(
+            services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(OpenAIEmbeddingProvider)),
+            embeddingKey,
+            embeddingModel,
+            embeddingDimensions),
+        services.GetRequiredService<HashedDenseEmbeddingProvider>(),
+        services.GetRequiredService<ILogger<ResilientEmbeddingProvider>>()));
+}
+else
+{
+    builder.Services.AddSingleton<IEmbeddingProvider>(services =>
+        services.GetRequiredService<HashedDenseEmbeddingProvider>());
+}
+
+// Model-written query variants are opt-in: the rule-based expander is free, adds no latency
+// and keeps a retrieval trace reproducible, which matters more here than fluent rewrites.
+if (builder.Configuration["Retrieval:QueryExpansionProvider"] == "OpenAI")
+{
+    var expansionKey = builder.Configuration["AI:ApiKey"]
+        ?? throw new InvalidOperationException("AI:ApiKey is required for model-generated query expansion.");
+    var expansionModel = builder.Configuration["Retrieval:QueryExpansionModel"]
+        ?? builder.Configuration["AI:Model"]
+        ?? "gpt-5-mini";
+    builder.Services.AddHttpClient<OpenAIQueryExpander>();
+    builder.Services.AddSingleton<IQueryExpander>(services => new OpenAIQueryExpander(
+        services.GetRequiredService<IHttpClientFactory>().CreateClient(nameof(OpenAIQueryExpander)),
+        expansionKey,
+        expansionModel,
+        services.GetRequiredService<DeterministicQueryExpander>(),
+        services.GetRequiredService<ILogger<OpenAIQueryExpander>>()));
+}
+else
+{
+    builder.Services.AddSingleton<IQueryExpander>(services =>
+        services.GetRequiredService<DeterministicQueryExpander>());
+}
+
+builder.Services.AddScoped<IPolicyRetriever>(services => new HybridPolicyRetriever(
+    services.GetRequiredService<IPolicyCandidateSource>(),
+    services.GetRequiredService<IEmbeddingProvider>(),
+    services.GetRequiredService<IQueryExpander>(),
+    services.GetRequiredService<ILateInteractionReranker>(),
+    services.GetRequiredService<PolicyVectorIndex>(),
+    services.GetRequiredService<HybridRetrievalOptions>()));
+
 if (builder.Configuration["Storage:Provider"] == "AzureBlob")
 {
     var accountName = builder.Configuration["Storage:AccountName"]
@@ -91,6 +165,15 @@ builder.Services.AddSingleton<PromptInjectionDetector>();
 builder.Services.AddSingleton<CitationValidator>();
 builder.Services.AddSingleton<RiskClassifier>();
 builder.Services.AddSingleton<ControlEvaluationRunner>();
+// Retrieval is measured against the configured retriever, but the answers it is measured on
+// are generated by the offline fixture: an evaluation run must be reproducible and must not
+// spend the live-model budget every time an administrator presses the button.
+builder.Services.AddScoped(services => new RagEvaluationRunner(
+    services.GetRequiredService<IPolicyRetriever>(),
+    new OfflineFixtureModelProvider(),
+    services.GetRequiredService<CitationValidator>(),
+    services.GetRequiredService<RiskClassifier>(),
+    services.GetRequiredService<IPiiRedactor>()));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<DemoIdentityService>();
 builder.Services.AddScoped<AuditWriter>();

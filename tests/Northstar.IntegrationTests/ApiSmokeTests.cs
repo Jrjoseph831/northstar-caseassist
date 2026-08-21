@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.Sqlite;
@@ -299,6 +300,45 @@ public sealed class ApiSmokeTests : IClassFixture<NorthstarApiFactory>
     }
 
     [Fact]
+    public async Task CaseAssist_SafetyTraceShowsEveryRetrievalStage()
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/api/v1/case-assist/requests")
+        {
+            Content = JsonContent.Create(new
+            {
+                caseId = Guid.Parse("c5e6ef52-1e03-47de-b58e-060e57f8ea31"),
+                question = "What paperwork is still outstanding on this case?"
+            })
+        };
+        request.Headers.Add("X-Northstar-Demo-User", "maya.chen");
+        var response = await _client.SendAsync(request);
+        var created = await response.Content.ReadFromJsonAsync<CaseAssistResponse>();
+
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        Assert.NotNull(created);
+
+        using var traceRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            $"/api/v1/case-assist/requests/{created.RequestId}/safety-trace");
+        traceRequest.Headers.Add("X-Northstar-Demo-User", "maya.chen");
+        var traceResponse = await _client.SendAsync(traceRequest);
+        using var trace = JsonDocument.Parse(await traceResponse.Content.ReadAsStringAsync());
+
+        Assert.Equal(HttpStatusCode.OK, traceResponse.StatusCode);
+        var retrieval = trace.RootElement.GetProperty("retrieval");
+        Assert.Equal("multi-query-hybrid-rrf-rerank-v1", retrieval.GetProperty("strategy").GetString());
+        Assert.True(retrieval.GetProperty("queries").GetArrayLength() > 1);
+        Assert.True(retrieval.GetProperty("dense").GetProperty("dimensions").GetInt32() > 0);
+        Assert.Equal("northstar-bm25-sparse-v1", retrieval.GetProperty("sparse").GetProperty("model").GetString());
+        Assert.Equal("reciprocal-rank-fusion", retrieval.GetProperty("fusion").GetProperty("method").GetString());
+        Assert.Equal("northstar-late-interaction-maxsim-v1", retrieval.GetProperty("rerank").GetProperty("model").GetString());
+        Assert.True(retrieval.GetProperty("ranking").GetArrayLength() > 0);
+        var topRanked = retrieval.GetProperty("ranking")[0];
+        Assert.True(topRanked.GetProperty("fusionRank").GetInt32() > 0);
+        Assert.False(string.IsNullOrWhiteSpace(topRanked.GetProperty("sourceId").GetString()));
+    }
+
+    [Fact]
     public async Task GovernanceEvaluation_PersistsCalculatedResults()
     {
         using var runRequest = new HttpRequestMessage(HttpMethod.Post, "/api/v1/governance/evaluations/run");
@@ -311,6 +351,13 @@ public sealed class ApiSmokeTests : IClassFixture<NorthstarApiFactory>
         Assert.Equal(run.Total, run.Passed + run.Failed);
         Assert.Equal(0, run.Failed);
         Assert.True(run.Total >= 8);
+        Assert.Contains("rag-golden", run.DatasetVersion, StringComparison.Ordinal);
+        var checks = JsonSerializer.Deserialize<List<EvaluationCheckResponse>>(run.ResultsJson, JsonOptions)!;
+        Assert.Contains(checks, item => item.Category == "Retrieval quality" && item.Name == "rag.retrieval.recall-at-3");
+        Assert.Contains(checks, item => item.Category == "Generation quality" && item.Name == "rag.generation.faithfulness");
+        Assert.Contains(checks, item => item.Category == "End-to-end");
+        Assert.Contains(checks, item => item.Category == "User experience");
+        Assert.All(checks, item => Assert.True(item.Passed, $"{item.Name}: {item.Evidence}"));
 
         using var listRequest = new HttpRequestMessage(HttpMethod.Get, "/api/v1/governance/evaluations");
         listRequest.Headers.Add("X-Northstar-Demo-User", "priya.shah");
@@ -366,7 +413,11 @@ public sealed class ApiSmokeTests : IClassFixture<NorthstarApiFactory>
     private sealed record CaseAssistResponse(string RequestId, bool RequiresReview, Guid? ReviewId, string Mode, List<PolicySourceResponse> Sources);
     private sealed record PolicySourceResponse(string SourceId);
     private sealed record ReviewResponse(string Status, string SubmittedByUserId, string AssignedReviewerId);
-    private sealed record EvaluationResponse(string RunId, int Total, int Passed, int Failed);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private sealed record EvaluationResponse(string RunId, string DatasetVersion, int Total, int Passed, int Failed, string ResultsJson);
+
+    private sealed record EvaluationCheckResponse(string Category, string Name, bool Passed, string Evidence);
     private sealed record CaseDocumentResponse(Guid Id, string Sha256, string ScanStatus, List<string> ReasonCodes);
 }
 
